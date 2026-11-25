@@ -68,3 +68,38 @@ curl -sS "$BASE/sheets/J50G001001"; echo
 
 step "12. 确认坏换表未生效：对照表仍是第 8 步的版本"
 curl -sS "$BASE/legend"; echo
+
+step "13. 情形一：换表退回后补报仍入库（新表删 01->0103，补报 0103=300 使其无解）"
+# 按旧图例该补报合法，可以正常入库
+curl -sS -X PUT "$BASE/sheets/J50G001002/review-totals" -H 'Content-Type: application/json' \
+  -d '{"totals": {"0103": 300}}'; echo
+curl -sS -o /tmp/legend_409.json -w '换表 HTTP %{http_code}\n' \
+  -X PUT "$BASE/legend" -H 'Content-Type: application/json' -d '{
+  "mapping": {
+    "01": ["0101"],
+    "02": ["0201", "0202"],
+    "03": ["0301", "0302", "0305"]
+  }
+}'
+cat /tmp/legend_409.json; echo
+curl -sS "$BASE/legend"; echo            # 版号仍是 2，原图例继续供数
+curl -sS "$BASE/sheets/J50G001002"; echo  # 补报的 0103=300 仍在库
+# 撤销补报，恢复可换表状态
+curl -sS -X PUT "$BASE/sheets/J50G001002/review-totals" -H 'Content-Type: application/json' \
+  -d '{"totals": {}}'; echo
+
+step "14. 情形二：撤销消除冲突后换表成功（新表删除整个 03 旧码）"
+# 直接换：两幅图都含 03 计数，全部冲突，409 列出全部冲突图幅
+curl -sS -o /tmp/legend_409b.json -w '换表 HTTP %{http_code}\n' \
+  -X PUT "$BASE/legend" -H 'Content-Type: application/json' \
+  -d '{"mapping": {"01": ["0101", "0102", "0103"], "02": ["0201", "0202"]}}'
+cat /tmp/legend_409b.json; echo
+# 撤销两幅图的 03 计数（替换式登记）
+curl -sS -X PUT "$BASE/sheets/J50G001001/old-counts" -H 'Content-Type: application/json' \
+  -d '{"counts": {"01": 1000, "02": 500}}'; echo
+curl -sS -X PUT "$BASE/sheets/J50G001002/old-counts" -H 'Content-Type: application/json' \
+  -d '{"counts": {"01": 400}}'; echo
+# 再次换表：冲突已消除，发布成功并递增版号
+curl -sS -X PUT "$BASE/legend" -H 'Content-Type: application/json' \
+  -d '{"mapping": {"01": ["0101", "0102", "0103"], "02": ["0201", "0202"]}}'; echo
+curl -sS "$BASE/overlap?sheet_id=J50G001001&old_code=03&new_code=0301"; echo
